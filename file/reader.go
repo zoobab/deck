@@ -15,16 +15,41 @@ import (
 
 var count counter.Counter
 
+func getDefaulter() (*utils.Defaulter, error) {
+	// TODO make defaults configurable
+	// TODO add support for file based defaults
+	var d utils.Defaulter
+	err := d.Register(&serviceDefaults)
+	if err != nil {
+		return nil, errors.Wrap(err, "registering service with defaulter")
+	}
+	err = d.Register(&routeDefaults)
+	if err != nil {
+		return nil, errors.Wrap(err, "registering route with defaulter")
+	}
+	err = d.Register(&upstreamDefaults)
+	if err != nil {
+		return nil, errors.Wrap(err, "registering upstream with defaulter")
+	}
+	err = d.Register(&targetDefaults)
+	if err != nil {
+		return nil, errors.Wrap(err, "registering target with defaulter")
+	}
+	return &d, nil
+}
+
 // GetStateFromFile reads in a file with filename and constructs
 // a state. It will return an error if the file representation is invalid
 // or if there is any error during processing.
 // All entities without an ID will get a `placeholder-{iota}` ID
 // assigned to them.
 func GetStateFromFile(filename string) (*state.KongState, error) {
-	// TODO add override logic
-	// TODO add support for file based defaults
 	if filename == "" {
 		return nil, errors.New("filename cannot be empty")
+	}
+	d, err := getDefaulter()
+	if err != nil {
+		return nil, errors.Wrap(err, "creating defaulter")
 	}
 	fileContent, err := readFile(filename)
 	if err != nil {
@@ -46,6 +71,10 @@ func GetStateFromFile(filename string) (*state.KongState, error) {
 		if err != state.ErrNotFound {
 			return nil, errors.Errorf("duplicate service definitions"+
 				" found for: '%s'", *s.Service.Name)
+		}
+		err = d.Set(&s.Service)
+		if err != nil {
+			return nil, errors.Wrap(err, "filling in defaults for service")
 		}
 		err = kongState.Services.Add(state.Service{Service: s.Service})
 		if err != nil {
@@ -76,6 +105,10 @@ func GetStateFromFile(filename string) (*state.KongState, error) {
 					" found for: '%s'", *r.Name)
 			}
 			r.Service = s.Service.DeepCopy()
+			err = d.Set(&r.Route)
+			if err != nil {
+				return nil, errors.Wrap(err, "filling in defaults for route")
+			}
 			err = kongState.Routes.Add(state.Route{Route: r.Route})
 			if err != nil {
 				return nil, err
@@ -116,6 +149,10 @@ func GetStateFromFile(filename string) (*state.KongState, error) {
 			return nil, errors.Errorf("duplicate upstream definitions"+
 				" found for: '%s'", *u.Name)
 		}
+		err = d.Set(&u.Upstream)
+		if err != nil {
+			return nil, errors.Wrap(err, "filling in defaults for upstream")
+		}
 		err = kongState.Upstreams.Add(state.Upstream{Upstream: u.Upstream})
 		if err != nil {
 			return nil, err
@@ -132,6 +169,10 @@ func GetStateFromFile(filename string) (*state.KongState, error) {
 					" found for: '%s'", *t.Target.Target)
 			}
 			t.Upstream = u.Upstream.DeepCopy()
+			err = d.Set(&t.Target)
+			if err != nil {
+				return nil, errors.Wrap(err, "filling in defaults for target")
+			}
 			err = kongState.Targets.Add(state.Target{Target: t.Target})
 			if err != nil {
 				return nil, err
